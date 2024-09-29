@@ -1,0 +1,122 @@
+main.html 
+
+구역1 코드 수정
+
+<!-- 구역1 -->
+<div class="info-item-1">
+    <h2>전력 사용량</h2>
+    <p>{{ user.UserName }}님 지역의 월 평균 전력 사용량 입니다.</p>
+    <canvas id="barChart" class="chart"></canvas>
+</div>
+
+
+그래프 스크립트 부분 코드 수정
+
+// views.py에서 전달받은 graph 데이터를 JavaScript로 변환
+        const graphData = JSON.parse('{{ graph|safe }}');
+
+        new Chart(barCtx, {
+            type: 'bar',
+            data: {
+                labels: ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'],
+                datasets: [{
+                    label: '전력 사용량 (kWh)',
+                    data: graphData,
+                    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                    borderColor: 'rgba(0, 0, 0, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+
+
+
+-----------------------
+views.py
+
+
+## ------------그래프 시각화 함수(graph_analysis) 추가
+import json
+
+# 월 별 전력사용량 막대그래프
+def graph_analysis(address): # 좌표를 받아
+    import pandas as pd
+        
+    power_usage = pd.read_csv("C:/KEPCO/sprint2/sprint2_0912_7에_그래프추가/media/진짜전력사용량.csv")
+    # 로그인 안 한 경우 나오게 하는 그래프
+    if address == '전국' :
+        monthly_avg_usage = power_usage.groupby('month')['powerUsage'].mean().reset_index()
+        return monthly_avg_usage['powerUsage'].values
+    # 로그인 한 경우 그래프
+    else :
+        target_lat,target_lon = address
+        power_usage['distance'] = power_usage.apply(lambda row: haversine(target_lat, target_lon, row['latitude'], row['longitude']), axis=1)
+        closest_region = power_usage.loc[power_usage['distance'].idxmin()]
+        # 사용자 패널 주소 지역
+        data = power_usage[power_usage['metro'].str.contains(closest_region['metro'])]
+        # 월 별 전력 사용량 막대그래프
+        monthly_avg_usage = data.groupby('month')['powerUsage'].mean().reset_index()
+        return monthly_avg_usage['powerUsage'].values
+
+## 메인페이지
+def main_view(request):
+    form = LoginForm()
+    
+    if request.user.is_authenticated:
+        Signup_Id = SignUp_User.objects.get(UserId=request.user).id
+        
+        # Panel 객체가 존재하는지 확인
+        panel = Panel.objects.filter(user_id=Signup_Id).first()
+        
+        if panel:
+            Panel_Id = panel.id
+            Location_id = Location.objects.get(user_id=Panel_Id).latitude,Location.objects.get(user_id=Panel_Id).longitude
+            capacity = Panel.objects.get(user_id=Signup_Id).capacity
+            # 데이터 분석 함수 호출
+            result, top_5_facilities = run_analysis(Location_id)
+            energy, power = power_analysis(Location_id,8,capacity)
+            
+            # 데이터 가공
+            capacity = [i for i in top_5_facilities.capacity]
+            address = [i for i in top_5_facilities.address]
+            latitude = [i for i in top_5_facilities.latitude]
+            longitude = [i for i in top_5_facilities.longitude]
+            distance = [i for i in top_5_facilities.distance]
+            
+            # 그래프 시각화
+            graph = graph_analysis(Location_id)
+        
+            # graph 데이터를 JSON으로 변환
+            graph_json = json.dumps(list(graph))
+
+            
+            return render(request, 'asd/main/basic/main.html', {
+                'form': form,
+                'result': result,
+                'top_5_facilities': top_5_facilities,
+                'capacity': capacity,
+                'address': address,
+                'latitude': latitude,
+                'longitude': longitude,
+                'distance': distance,
+                'power':power,
+                'energy':energy,
+                'graph':graph_json
+            })
+
+    # 로그인 안 한 경우 나올 그래프
+    graph = graph_analysis('전국')
+        
+    # graph 데이터를 JSON으로 변환
+    graph_json = json.dumps(list(graph))
+
+    # Panel 객체가 없거나 인증되지 않은 경우
+    return render(request, 'asd/main/basic/main.html', {'form': form,'graph':graph_json})
